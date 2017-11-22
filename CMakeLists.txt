@@ -12,6 +12,10 @@ set(INSTALL_INC_DIR "${CMAKE_INSTALL_PREFIX}/include" CACHE PATH "Installation d
 set(INSTALL_MAN_DIR "${CMAKE_INSTALL_PREFIX}/share/man" CACHE PATH "Installation directory for manual pages")
 set(INSTALL_PKGCONFIG_DIR "${CMAKE_INSTALL_PREFIX}/share/pkgconfig" CACHE PATH "Installation directory for pkgconfig (.pc) files")
 
+
+set(ZLIB_BUILD_SHARED ON CACHE BOOL "Build Shared Library")
+set(ZLIB_BUILD_STATIC ON CACHE BOOL "Build Static Library")
+
 include(CheckTypeSize)
 include(CheckSymbolExists)
 include(CheckFunctionExists)
@@ -571,39 +575,52 @@ if(MINGW OR MSYS)
     set(ZLIB_DLL_SRCS ${CMAKE_CURRENT_BINARY_DIR}/zlib1rc.obj)
 endif(MINGW OR MSYS)
 
-add_library(zlib SHARED ${ZLIB_SRCS} ${ZLIB_GZFILE_SRCS} ${ZLIB_ARCH_SRCS} ${ZLIB_ASMS} ${ZLIB_DLL_SRCS} ${ZLIB_PUBLIC_HDRS} ${ZLIB_PRIVATE_HDRS})
-add_library(zlibstatic STATIC ${ZLIB_SRCS} ${ZLIB_GZFILE_SRCS} ${ZLIB_ARCH_SRCS} ${ZLIB_ASMS} ${ZLIB_PUBLIC_HDRS} ${ZLIB_PRIVATE_HDRS})
 
-set_target_properties(zlib PROPERTIES DEFINE_SYMBOL ZLIB_DLL)
-set_target_properties(zlib PROPERTIES SOVERSION 1)
-
-if(NOT CYGWIN)
-    # This property causes shared libraries on Linux to have the full version
-    # encoded into their final filename.  We disable this on Cygwin because
-    # it causes cygz-${ZLIB_FULL_VERSION}.dll to be created when cygz.dll
-    # seems to be the default.
-    #
-    # This has no effect with MSVC, on that platform the version info for
-    # the DLL comes from the resource file win32/zlib1.rc
-    set_target_properties(zlib PROPERTIES VERSION ${ZLIB_FULL_VERSION})
+if(NOT ZLIB_BUILD_STATIC AND NOT ZLIB_BUILD_SHARED)
+    message(FATAL_ERROR "You must build atleast a static or shared library")
 endif()
 
-if(UNIX)
-    # On unix-like platforms the library is almost always called libz
-   set_target_properties(zlib zlibstatic PROPERTIES OUTPUT_NAME z)
-   if(NOT APPLE)
-     set_target_properties(zlib PROPERTIES LINK_FLAGS "-Wl,--version-script,\"${CMAKE_CURRENT_SOURCE_DIR}/zlib.map\"")
-   endif()
-elseif(MSYS)
-   # Suppress version number from shared library name
-   set(CMAKE_SHARED_LIBRARY_NAME_WITH_VERSION 0)
-elseif(BUILD_SHARED_LIBS AND WIN32)
-    # Creates zlib1.dll when building shared library version
-    set_target_properties(zlib PROPERTIES SUFFIX "1.dll")
+set(BUILT_LIBS)
+if(ZLIB_BUILD_STATIC)
+    add_library(zlibstatic STATIC ${ZLIB_SRCS} ${ZLIB_GZFILE_SRCS} ${ZLIB_ARCH_SRCS} ${ZLIB_ASMS} ${ZLIB_PUBLIC_HDRS} ${ZLIB_PRIVATE_HDRS})
+    set_target_properties(zlibstatic PROPERTIES OUTPUT_NAME z)
+    list(APPEND BUILT_LIBS zlibstatic)
+endif()
+
+if(ZLIB_BUILD_SHARED)
+    add_library(zlib SHARED ${ZLIB_SRCS} ${ZLIB_GZFILE_SRCS} ${ZLIB_ARCH_SRCS} ${ZLIB_ASMS} ${ZLIB_DLL_SRCS} ${ZLIB_PUBLIC_HDRS} ${ZLIB_PRIVATE_HDRS})
+    set_target_properties(zlib PROPERTIES DEFINE_SYMBOL ZLIB_DLL)
+    set_target_properties(zlib PROPERTIES SOVERSION 1)
+    list(APPEND BUILT_LIBS zlib)
+
+    if(NOT CYGWIN)
+        # This property causes shared libraries on Linux to have the full version
+        # encoded into their final filename.  We disable this on Cygwin because
+        # it causes cygz-${ZLIB_FULL_VERSION}.dll to be created when cygz.dll
+        # seems to be the default.
+        #
+        # This has no effect with MSVC, on that platform the version info for
+        # the DLL comes from the resource file win32/zlib1.rc
+        set_target_properties(zlib PROPERTIES VERSION ${ZLIB_FULL_VERSION})
+    endif()
+
+    if(UNIX)
+        # On unix-like platforms the library is almost always called libz
+    set_target_properties(zlib PROPERTIES OUTPUT_NAME z)
+    if(NOT APPLE)
+        set_target_properties(zlib PROPERTIES LINK_FLAGS "-Wl,--version-script,\"${CMAKE_CURRENT_SOURCE_DIR}/zlib.map\"")
+    endif()
+    elseif(MSYS)
+    # Suppress version number from shared library name
+    set(CMAKE_SHARED_LIBRARY_NAME_WITH_VERSION 0)
+    elseif(BUILD_SHARED_LIBS AND WIN32)
+        # Creates zlib1.dll when building shared library version
+        set_target_properties(zlib PROPERTIES SUFFIX "1.dll")
+    endif()
 endif()
 
 if(NOT SKIP_INSTALL_LIBRARIES AND NOT SKIP_INSTALL_ALL )
-    install(TARGETS zlib zlibstatic
+    install(TARGETS ${BUILT_LIBS}
         RUNTIME DESTINATION "${INSTALL_BIN_DIR}"
         ARCHIVE DESTINATION "${INSTALL_LIB_DIR}"
         LIBRARY DESTINATION "${INSTALL_LIB_DIR}" )
@@ -618,26 +635,29 @@ if(NOT SKIP_INSTALL_FILES AND NOT SKIP_INSTALL_ALL )
     install(FILES ${ZLIB_PC} DESTINATION "${INSTALL_PKGCONFIG_DIR}")
 endif()
 
-#============================================================================
-# Example binaries
-#============================================================================
+if(ZLIB_BUILD_SHARED)
 
-add_executable(example test/example.c)
-target_link_libraries(example zlib)
-add_test(example example${CMAKE_EXECUTABLE_SUFFIX})
+    #============================================================================
+    # Example binaries
+    #============================================================================
 
-add_executable(minigzip test/minigzip.c)
-target_link_libraries(minigzip zlib)
+    add_executable(example test/example.c)
+    target_link_libraries(example zlib)
+    add_test(example example${CMAKE_EXECUTABLE_SUFFIX})
 
-if(HAVE_OFF64_T)
-    add_executable(example64 test/example.c)
-    target_link_libraries(example64 zlib)
-    set_target_properties(example64 PROPERTIES COMPILE_FLAGS "-D_FILE_OFFSET_BITS=64")
-    add_test(example64 example64${CMAKE_EXECUTABLE_SUFFIX})
+    add_executable(minigzip test/minigzip.c)
+    target_link_libraries(minigzip zlib)
 
-    add_executable(minigzip64 test/minigzip.c)
-    target_link_libraries(minigzip64 zlib)
-    set_target_properties(minigzip64 PROPERTIES COMPILE_FLAGS "-D_FILE_OFFSET_BITS=64")
+    if(HAVE_OFF64_T)
+        add_executable(example64 test/example.c)
+        target_link_libraries(example64 zlib)
+        set_target_properties(example64 PROPERTIES COMPILE_FLAGS "-D_FILE_OFFSET_BITS=64")
+        add_test(example64 example64${CMAKE_EXECUTABLE_SUFFIX})
+
+        add_executable(minigzip64 test/minigzip.c)
+        target_link_libraries(minigzip64 zlib)
+        set_target_properties(minigzip64 PROPERTIES COMPILE_FLAGS "-D_FILE_OFFSET_BITS=64")
+    endif()
 endif()
 
 FEATURE_SUMMARY(WHAT ALL INCLUDE_QUIET_PACKAGES)
